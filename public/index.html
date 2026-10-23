@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="Self-hosted password manager">
+  <title>Pass Manager</title>
+
+  <!-- PWA meta tags -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PassMgr">
+  <meta name="mobile-web-app-capable" content="yes">
+
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f23;
+      --card: #1a1a2e;
+      --card2: #16213e;
+      --accent: #6c63ff;
+      --accent-dim: #5548d9;
+      --accent-glow: rgba(108, 99, 255, 0.25);
+      --danger: #e74c3c;
+      --danger-dim: #c0392b;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --text: #e8e8f0;
+      --text-dim: #8888aa;
+      --border: rgba(108, 99, 255, 0.2);
+      --border-hover: rgba(108, 99, 255, 0.5);
+      --input-bg: #0d0d1f;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    #app {
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ── Screen Layout ─────────────────────────────────────────────────────────── */
+    .screen {
+      display: none;
+      width: 100%;
+      max-width: 480px;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      flex-direction: column;
+      animation: fadeIn 0.25s ease;
+    }
+    .screen.active { display: flex; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Logo ─────────────────────────────────────────────────────────────────── */
+    .logo {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 32px 0 16px;
+    }
+    .logo-icon {
+      width: 64px; height: 64px;
+      background: var(--accent);
+      border-radius: 20px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 8px 32px var(--accent-glow);
+    }
+    .logo-icon svg { width: 36px; height: 36px; }
+    .logo-title { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo-sub { font-size: 13px; color: var(--text-dim); }
+
+    /* ── Cards ─────────────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin: 0 16px;
+    }
+
+    /* ── Form Elements ─────────────────────────────────────────────────────────── */
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+    .input-wrap { position: relative; }
+    input[type="text"],
+    input[type="password"],
+    input[type="url"],
+    input[type="email"],
+    textarea,
+    select {
+      width: 100%;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 15px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    input:focus, textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+    .input-with-btn input { padding-right: 44px; }
+    .input-btn {
+      position: absolute;
+      right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; cursor: pointer;
+      color: var(--text-dim); font-size: 18px; padding: 4px;
+      display: flex; align-items: center;
+      transition: color 0.2s;
+    }
+    .input-btn:hover { color: var(--text); }
+
+    /* ── Buttons ─────────────────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 11px 20px;
+      border-radius: var(--radius-sm);
+      border: none; cursor: pointer;
+      font-size: 15px; font-weight: 600;
+      transition: all 0.2s;
+      text-decoration: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary {
+      background: var(--accent); color: #fff;
+      box-shadow: 0 4px 16px var(--accent-glow);
+    }
+    .btn-primary:hover { background: var(--accent-dim); }
+    .btn-secondary {
+      background: var(--card2); color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--border-hover); }
+    .btn-danger {
+      background: var(--danger); color: #fff;
+    }
+    .btn-danger:hover { background: var(--danger-dim); }
+    .btn-ghost {
+      background: transparent; color: var(--text-dim);
+      padding: 8px;
+    }
+    .btn-ghost:hover { color: var(--text); }
+    .btn-full { width: 100%; }
+    .btn-sm { padding: 7px 14px; font-size: 13px; }
+    .btn-icon {
+      width: 36px; height: 36px; padding: 0;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 16px;
+    }
+    .btn-icon:hover { border-color: var(--border-hover); }
+
+    /* ── Setup & Unlock screens ──────────────────────────────────────────────── */
+    #screen-setup, #screen-unlock {
+      padding: 0 16px 32px;
+      justify-content: flex-start;
+    }
+    .screen-heading {
+      font-size: 20px; font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .screen-sub {
+      font-size: 13px; color: var(--text-dim);
+      margin-bottom: 20px;
+    }
+    .setup-note {
+      font-size: 12px; color: var(--text-dim);
+      text-align: center; margin-top: 12px;
+      line-height: 1.6;
+    }
+    .setup-note strong { color: var(--warning); }
+
+    /* ── Unlock extras ──────────────────────────────────────────────────────── */
+    .server-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px; font-size: 12px; font-weight: 600;
+      margin-bottom: 16px;
+    }
+    .server-badge.online  { background: rgba(46,204,113,0.15); color: var(--success); }
+    .server-badge.offline { background: rgba(231,76,60,0.15);  color: var(--danger); }
+    .server-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .forgot-link {
+      display: block; text-align: center; margin-top: 12px;
+      font-size: 13px; color: var(--text-dim); cursor: pointer;
+      text-decoration: underline; background: none; border: none;
+    }
+    .forgot-link:hover { color: var(--text); }
+
+    .shake {
+      animation: shake 0.4s ease;
+    }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      20% { transform: translateX(-8px); }
+      40% { transform: translateX(8px); }
+      60% { transform: translateX(-6px); }
+      80% { transform: translateX(6px); }
+    }
+
+    /* ── Main screen ─────────────────────────────────────────────────────────── */
+    #screen-main {
+      padding: 0;
+    }
+    .topbar {
+      display: flex; align-items: center;
+      padding: 12px 16px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      gap: 8px;
+    }
+    .topbar-title {
+      flex: 1; font-size: 18px; font-weight: 700;
+    }
+    .search-wrap {
+      padding: 12px 16px 8px;
+    }
+    .search-wrap input {
+      padding-left: 36px;
+      background: var(--card);
+    }
+    .search-icon {
+      position: absolute; left: 10px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim); font-size: 16px;
+      pointer-events: none;
+    }
+    .status-bar {
+      padding: 0 16px 8px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .last-synced { font-size: 11px; color: var(--text-dim); }
+
+    /* ── Password cards ─────────────────────────────────────────────────────── */
+    .pw-list {
+      flex: 1; overflow-y: auto;
+      padding: 0 16px 80px;
+    }
+    .pw-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .pw-card:hover { border-color: var(--border-hover); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+    .pw-card-top {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .pw-favicon {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: var(--card2);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden; flex-shrink: 0;
+    }
+    .pw-favicon img { width: 100%; height: 100%; object-fit: cover; }
+    .pw-favicon-fallback { font-size: 16px; }
+    .pw-info { flex: 1; min-width: 0; }
+    .pw-title {
+      font-size: 15px; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .pw-username {
+      font-size: 12px; color: var(--text-dim);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .pw-actions {
+      display: flex; gap: 6px; flex-shrink: 0;
+    }
+
+    /* ── Empty state ─────────────────────────────────────────────────────────── */
+    .empty-state {
+      text-align: center; padding: 60px 20px;
+      color: var(--text-dim);
+    }
+    .empty-state-icon { font-size: 48px; margin-bottom: 16px; }
+    .empty-state h3 { font-size: 18px; color: var(--text); margin-bottom: 8px; }
+    .empty-state p  { font-size: 14px; }
+
+    /* ── Add/Edit screen (modal-style slide-up) ──────────────────────────────── */
+    #screen-add {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      z-index: 100;
+      overflow-y: auto;
+      padding: 0;
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex !important; /* always in DOM, shown via transform */
+    }
+    #screen-add.slide-in { transform: translateY(0); }
+
+    .screen-header {
+      display: flex; align-items: center;
+      padding: 12px 16px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .screen-header-title { flex: 1; font-size: 18px; font-weight: 700; }
+    .add-form {
+      flex: 1; overflow-y: auto;
+      padding: 16px;
+    }
+
+    /* ── Password strength ───────────────────────────────────────────────────── */
+    .strength-bar {
+      height: 4px; border-radius: 2px;
+      background: var(--card2);
+      margin-top: 6px;
+      overflow: hidden;
+    }
+    .strength-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.3s, background 0.3s;
+    }
+    .strength-label { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+    /* ── Generator panel ─────────────────────────────────────────────────────── */
+    .gen-panel {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      margin-top: 10px;
+      display: none;
+    }
+    .gen-panel.open { display: block; }
+    .gen-row {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      gap: 8px;
+    }
+    .gen-row label { font-size: 13px; color: var(--text-dim); }
+    .gen-row:last-child { margin-bottom: 0; }
+    input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none; appearance: none;
+      height: 4px; background: var(--border); border-radius: 2px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--accent); cursor: pointer;
+    }
+    .gen-len-val {
+      min-width: 28px; text-align: right;
+      font-size: 13px; font-weight: 700; color: var(--accent);
+    }
+    .toggle-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .toggle-chip {
+      padding: 4px 10px; border-radius: 20px; font-size: 12px;
+      border: 1px solid var(--border); background: var(--card);
+      cursor: pointer; transition: all 0.2s; user-select: none;
+      color: var(--text-dim);
+    }
+    .toggle-chip.on {
+      background: var(--accent); border-color: var(--accent);
+      color: #fff;
+    }
+
+    /* ── Settings screen ─────────────────────────────────────────────────────── */
+    #screen-settings {
+      overflow-y: auto;
+    }
+    .settings-section {
+      margin: 16px;
+    }
+    .settings-section-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.8px; color: var(--accent);
+      padding: 0 4px; margin-bottom: 10px;
+    }
+    .settings-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .settings-row {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px;
+    }
+    .settings-row:last-child { border-bottom: none; }
+    .settings-row-label { font-size: 14px; }
+    .settings-row-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    .conn-status {
+      font-size: 13px; font-weight: 600;
+      padding: 6px 12px; border-radius: 6px;
+    }
+    .conn-status.ok     { background: rgba(46,204,113,0.15); color: var(--success); }
+    .conn-status.fail   { background: rgba(231,76,60,0.15);  color: var(--danger); }
+    .conn-status.idle   { background: var(--card2); color: var(--text-dim); }
+
+    /* ── Toast ───────────────────────────────────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      bottom: 24px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      display: flex; flex-direction: column; gap: 8px;
+      align-items: center;
+      pointer-events: none;
+    }
+    .toast {
+      padding: 10px 18px;
+      border-radius: 24px;
+      font-size: 14px; font-weight: 500;
+      color: #fff;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards;
+      white-space: nowrap;
+      max-width: 320px; text-align: center;
+    }
+    .toast.success { background: var(--success); }
+    .toast.error   { background: var(--danger); }
+    .toast.info    { background: var(--accent); }
+    @keyframes toastIn  {
+      from { opacity: 0; transform: translateY(16px) scale(0.9); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes toastOut {
+      from { opacity: 1; transform: translateY(0) scale(1); }
+      to   { opacity: 0; transform: translateY(-8px) scale(0.9); }
+    }
+
+    /* ── Loading spinner ─────────────────────────────────────────────────────── */
+    .spinner {
+      width: 24px; height: 24px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-overlay {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px;
+      z-index: 200;
+    }
+    .loading-overlay p { color: var(--text-dim); font-size: 14px; }
+
+    /* ── Confirm modal ───────────────────────────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .modal {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      max-width: 340px; width: 100%;
+      animation: fadeIn 0.2s ease;
+    }
+    .modal h3 { font-size: 17px; margin-bottom: 10px; }
+    .modal p  { font-size: 14px; color: var(--text-dim); margin-bottom: 20px; }
+    .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
+
+    /* ── Divider ─────────────────────────────────────────────────────────────── */
+    .divider { height: 1px; background: var(--border); margin: 8px 0; }
+
+    /* ── Setup tabs ─────────────────────────────────────────────────────────── */
+    .setup-tabs { display:flex; background:var(--bg); border-radius:10px; padding:3px; margin-bottom:20px; gap:3px; }
+    .setup-tab { flex:1; padding:8px; border:none; border-radius:8px; background:transparent;
+                 color:var(--text-dim); font-size:14px; font-weight:500; cursor:pointer; transition:all .2s; }
+    .setup-tab.active { background:var(--accent); color:#fff; }
+
+    /* ── Safe area padding for iOS ───────────────────────────────────────────── */
+    .pb-safe { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+
+    /* ── Scrollbar styling ───────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── Import options ──────────────────────────────────────────────────────── */
+    .radio-group { display: flex; gap: 16px; margin-top: 6px; }
+    .radio-label {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 14px; cursor: pointer;
+    }
+    .radio-label input { accent-color: var(--accent); }
+
+    /* ── Change password form (in settings) ────────────────────────────────── */
+    #change-pw-form {
+      margin-top: 12px; display: none;
+    }
+    #change-pw-form.open { display: block; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Loading overlay ──────────────────────────────────────────────────── -->
+  <div class="loading-overlay" id="loading-overlay">
+    <div class="spinner"></div>
+    <p>Loading…</p>
+  </div>
+
+  <!-- ── Screen: Setup ─────────────────────────────────────────────────────── -->
+  <div class="screen" id="screen-setup">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 36 36" fill="none">
+          <circle cx="18" cy="14" r="7" stroke="white" stroke-width="2.5"/>
+          <rect x="7" y="20" width="22" height="14" rx="3" fill="white"/>
+          <rect x="16" y="26" width="4" height="5" rx="1" fill="#6c63ff"/>
+        </svg>
+      </div>
+      <div class="logo-title">Pass Manager</div>
+      <div class="logo-sub">Secure. Private. Yours.</div>
+    </div>
+
+    <div class="card">
+      <!-- Mode tabs -->
+      <div class="setup-tabs">
+        <button class="setup-tab active" id="tab-signin" onclick="switchSetupMode('signin')">Sign In</button>
+        <button class="setup-tab" id="tab-create" onclick="switchSetupMode('create')">Create Account</button>
+      </div>
+
+      <!-- ── Sign in mode ── -->
+      <div id="setup-mode-signin">
+        <div class="screen-heading">Sign In</div>
+        <div class="screen-sub">Open your vault on this device</div>
+
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" id="signin-username" placeholder="Your username"
+                 autocomplete="username" autocapitalize="none" spellcheck="false">
+        </div>
+
+        <div class="form-group">
+          <label>Master Password</label>
+          <div class="input-wrap input-with-btn">
+            <input type="password" id="signin-password" placeholder="Your master password"
+                   autocomplete="current-password"
+                   onkeydown="if(event.key==='Enter')handleSignIn()">
+            <button class="input-btn" onclick="togglePw('signin-password', this)" tabindex="-1">👁</button>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-full" onclick="handleSignIn()">Sign In</button>
+      </div>
+
+      <!-- ── Create account mode ── -->
+      <div id="setup-mode-create" style="display:none">
+        <div class="screen-heading">Create Account</div>
+        <div class="screen-sub">Each account has its own encrypted vault</div>
+
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" id="create-username" placeholder="3–64 characters"
+                 autocomplete="username" autocapitalize="none" spellcheck="false">
+        </div>
+
+        <div class="form-group">
+          <label>Master Password</label>
+          <div class="input-wrap input-with-btn">
+            <input type="password" id="setup-password" placeholder="Strong password" autocomplete="new-password">
+            <button class="input-btn" onclick="togglePw('setup-password', this)" tabindex="-1">👁</button>
+          </div>
+          <div class="strength-bar"><div class="strength-fill" id="setup-strength-fill"></div></div>
+          <div class="strength-label" id="setup-strength-label"></div>
+        </div>
+
+        <div class="form-group">
+          <label>Confirm Password</label>
+          <div class="input-wrap input-with-btn">
+            <input type="password" id="setup-confirm" placeholder="Repeat password" autocomplete="new-password">
+            <button class="input-btn" onclick="togglePw('setup-confirm', this)" tabindex="-1">👁</button>
+          </div>
+        </div>
+
+        <div class="form-group" id="signup-code-group" style="display:none">
+          <label>Signup Code</label>
+          <input type="text" id="create-signup-code" placeholder="Ask the server owner" autocomplete="off">
+        </div>
+
+        <button class="btn btn-primary btn-full" onclick="handleRegister()">Create Account</button>
+
+        <p class="setup-note">
+          <strong>⚠ Important:</strong> Your master password encrypts your vault on this device
+          before anything is sent. Nobody — including the server owner — can recover it if forgotten.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Screen: Unlock ────────────────────────────────────────────────────── -->
+  <div class="screen" id="screen-unlock">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 36 36" fill="none">
+          <circle cx="18" cy="14" r="7" stroke="white" stroke-width="2.5"/>
+          <rect x="7" y="20" width="22" height="14" rx="3" fill="white"/>
+          <rect x="16" y="26" width="4" height="5" rx="1" fill="#6c63ff"/>
+        </svg>
+      </div>
+      <div class="logo-title">Pass Manager</div>
+      <div class="logo-sub">Your passwords, your control</div>
+    </div>
+
+    <div class="card" style="flex:0">
+      <div style="display:flex;justify-content:center;margin-bottom:16px">
+        <div class="server-badge offline" id="unlock-server-badge">Checking server…</div>
+      </div>
+
+      <div class="screen-heading">Welcome Back</div>
+      <div class="screen-sub">Unlock the vault for <strong id="unlock-username"></strong></div>
+
+      <div class="form-group">
+        <label>Master Password</label>
+        <div class="input-wrap input-with-btn" id="unlock-pw-wrap">
+          <input type="password" id="unlock-password" placeholder="Master password"
+                 autocomplete="current-password"
+                 onkeydown="if(event.key==='Enter')handleUnlock()">
+          <button class="input-btn" onclick="togglePw('unlock-password', this)" tabindex="-1">👁</button>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-full" onclick="handleUnlock()">Unlock</button>
+      <button class="forgot-link" onclick="handleSignOut()">Not you? Sign out / switch account</button>
+    </div>
+  </div>
+
+  <!-- ── Screen: Main ──────────────────────────────────────────────────────── -->
+  <div class="screen" id="screen-main">
+    <div class="topbar">
+      <span class="topbar-title">Pass Manager</span>
+      <button class="btn btn-icon" onclick="showSettings()" title="Settings">⚙</button>
+      <button class="btn btn-primary btn-icon" onclick="showAdd()" title="Add password" style="background:var(--accent);color:#fff;border:none">+</button>
+    </div>
+
+    <div class="search-wrap">
+      <div class="input-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" placeholder="Search passwords…"
+               oninput="handleSearch(this.value)">
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <div class="server-badge offline" id="main-server-badge">Offline</div>
+      <div class="last-synced" id="last-synced-label"></div>
+    </div>
+
+    <div class="pw-list" id="pw-list"></div>
+  </div>
+
+  <!-- ── Screen: Add/Edit ──────────────────────────────────────────────────── -->
+  <div id="screen-add">
+    <div style="width:100%;max-width:480px;margin:0 auto;display:flex;flex-direction:column;min-height:100vh">
+      <div class="screen-header">
+        <button class="btn btn-ghost" onclick="closeAdd()">← Back</button>
+        <div class="screen-header-title" id="add-screen-title">Add Password</div>
+      </div>
+      <div class="add-form pb-safe">
+        <div class="form-group">
+          <label>Title *</label>
+          <input type="text" id="add-title" placeholder="e.g. Gmail, Netflix">
+        </div>
+        <div class="form-group">
+          <label>Website URL</label>
+          <input type="url" id="add-url" placeholder="https://example.com">
+        </div>
+        <div class="form-group">
+          <label>Username / Email</label>
+          <input type="text" id="add-username" placeholder="your@email.com" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Password *</label>
+          <div class="input-wrap input-with-btn">
+            <input type="password" id="add-password" placeholder="Password"
+                   autocomplete="new-password" oninput="updateStrength(this.value)">
+            <button class="input-btn" onclick="togglePw('add-password', this)" tabindex="-1">👁</button>
+          </div>
+          <div class="strength-bar"><div class="strength-fill" id="add-strength-fill"></div></div>
+          <div class="strength-label" id="add-strength-label"></div>
+        </div>
+
+        <button class="btn btn-secondary btn-sm" onclick="toggleGenPanel()">⚡ Generate Password</button>
+
+        <div class="gen-panel" id="gen-panel">
+          <div class="gen-row">
+            <label>Length</label>
+            <input type="range" id="gen-length" min="8" max="32" value="16"
+                   oninput="document.getElementById('gen-len-val').textContent=this.value; regenerate()">
+            <span class="gen-len-val" id="gen-len-val">16</span>
+          </div>
+          <div class="gen-row">
+            <div class="toggle-row">
+              <span class="toggle-chip on" id="chip-upper" onclick="toggleChip('chip-upper');regenerate()">ABC</span>
+              <span class="toggle-chip on" id="chip-lower" onclick="toggleChip('chip-lower');regenerate()">abc</span>
+              <span class="toggle-chip on" id="chip-num"   onclick="toggleChip('chip-num');regenerate()">123</span>
+              <span class="toggle-chip on" id="chip-sym"   onclick="toggleChip('chip-sym');regenerate()">!@#</span>
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm btn-full" onclick="regenerate()" style="margin-top:8px">
+            🔄 Regenerate
+          </button>
+        </div>
+
+        <div class="form-group" style="margin-top:14px">
+          <label>Notes</label>
+          <textarea id="add-notes" placeholder="Optional notes…"></textarea>
+        </div>
+
+        <button class="btn btn-primary btn-full" style="margin-top:4px" onclick="handleSave()">Save Password</button>
+        <button class="btn btn-danger btn-full" style="margin-top:10px;display:none" id="btn-delete" onclick="handleDelete()">
+          Delete Password
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Screen: Settings ─────────────────────────────────────────────────── -->
+  <div class="screen" id="screen-settings" style="overflow-y:auto">
+    <div class="screen-header">
+      <button class="btn btn-ghost" onclick="showScreen('main')">← Back</button>
+      <div class="screen-header-title">Settings</div>
+    </div>
+
+    <!-- Account section -->
+    <div class="settings-section">
+      <div class="settings-section-title">Account</div>
+      <div class="card" style="margin:0">
+        <div class="form-group" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span>Signed in as <strong id="settings-username">—</strong></span>
+        </div>
+        <button class="btn btn-secondary btn-full" onclick="handleSignOut()">↩ Sign Out of This Device</button>
+      </div>
+    </div>
+
+    <!-- Data section -->
+    <div class="settings-section">
+      <div class="settings-section-title">Data</div>
+      <div class="card" style="margin:0">
+        <div class="form-group">
+          <button class="btn btn-secondary btn-full" onclick="handleExport()">⬇ Export Encrypted Backup</button>
+        </div>
+        <div class="form-group">
+          <button class="btn btn-secondary btn-full" onclick="document.getElementById('import-file').click()">⬆ Import Backup</button>
+          <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(this)">
+        </div>
+        <div class="form-group">
+          <label>Import Mode</label>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="import-mode" value="merge" checked> Merge
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="import-mode" value="replace"> Replace all
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Account section -->
+    <div class="settings-section pb-safe">
+      <div class="settings-section-title">Security</div>
+      <div class="card" style="margin:0">
+        <div class="form-group">
+          <button class="btn btn-secondary btn-full" onclick="toggleChangePwForm()">🔑 Change Master Password</button>
+          <div id="change-pw-form">
+            <div style="height:12px"></div>
+            <div class="form-group">
+              <label>Current Password</label>
+              <input type="password" id="cpw-current" placeholder="Current master password">
+            </div>
+            <div class="form-group">
+              <label>New Password</label>
+              <input type="password" id="cpw-new" placeholder="New master password">
+            </div>
+            <div class="form-group">
+              <label>Confirm New Password</label>
+              <input type="password" id="cpw-confirm" placeholder="Confirm new password">
+            </div>
+            <button class="btn btn-primary btn-full" onclick="handleChangePw()">Update Password</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <button class="btn btn-secondary btn-full" onclick="lockApp()">🔒 Lock App</button>
+        </div>
+        <div>
+          <button class="btn btn-danger btn-full" onclick="handleDeleteAccount()">⚠ Delete Account</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /#app -->
+
+<div id="toast-container"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
