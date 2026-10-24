@@ -66,6 +66,91 @@ const Crypto = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PASSKEY UNLOCK ═══
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// A passkey can stand in for the master password on this device. The WebAuthn
+// PRF extension yields a secret only the authenticator can reproduce (after
+// Face ID / Touch ID / PIN); it encrypts a copy of the vault key kept in
+// localStorage. The server never sees any of it: unlocking still proves the key
+// with the usual auth key, so the zero-knowledge model is unchanged.
+
+const Passkey = {
+  STORAGE_KEY: 'pm_passkey',   // { credId, salt, wrapped }
+
+  supported() { return !!(window.PublicKeyCredential && navigator.credentials); },
+  enrolled()  { return !!localStorage.getItem(this.STORAGE_KEY); },
+  remove()    { localStorage.removeItem(this.STORAGE_KEY); },
+
+  // AES key derived from the PRF output, used only to wrap the vault key.
+  async wrappingKey(prfOutput) {
+    const base = await crypto.subtle.importKey('raw', prfOutput, 'HKDF', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode('pass-manager:passkey-wrap:v1') },
+      base,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  },
+
+  // Ask the authenticator for the PRF output of an existing credential.
+  async evaluate(credId, salt) {
+    const cred = await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: [{ type: 'public-key', id: fromB64(credId) }],
+      userVerification: 'required',
+      extensions: { prf: { eval: { first: fromB64(salt) } } }
+    }});
+    const out = cred.getClientExtensionResults().prf?.results?.first;
+    if (!out) throw new Error('this passkey does not support unlocking (PRF)');
+    return new Uint8Array(out);
+  },
+
+  async store(credId, salt, prfOutput, masterKey) {
+    const raw     = new Uint8Array(await crypto.subtle.exportKey('raw', masterKey));
+    const wrapped = await Crypto.encrypt(await this.wrappingKey(prfOutput), toB64(raw));
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify({ credId, salt, wrapped }));
+  },
+
+  async enroll(masterKey, userId, username) {
+    const salt = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const cred = await navigator.credentials.create({ publicKey: {
+      rp: { name: 'Pass Manager' },
+      user: { id: new TextEncoder().encode(userId), name: username, displayName: username },
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+      extensions: { prf: { eval: { first: fromB64(salt) } } }
+    }});
+    const prf    = cred.getClientExtensionResults().prf;
+    const credId = toB64(new Uint8Array(cred.rawId));
+    if (!prf?.results?.first && !prf?.enabled) {
+      throw new Error('this browser or authenticator does not support passkey unlock (PRF). You can delete the passkey it just saved.');
+    }
+    // Some authenticators only evaluate PRF on sign-in, which costs a second prompt.
+    const out = prf.results?.first ? new Uint8Array(prf.results.first) : await this.evaluate(credId, salt);
+    await this.store(credId, salt, out, masterKey);
+  },
+
+  // Re-encrypt the stored copy after the master password changes.
+  async rewrap(masterKey) {
+    const { credId, salt } = JSON.parse(localStorage.getItem(this.STORAGE_KEY));
+    await this.store(credId, salt, await this.evaluate(credId, salt), masterKey);
+  },
+
+  async unlock() {
+    const { credId, salt, wrapped } = JSON.parse(localStorage.getItem(this.STORAGE_KEY));
+    const out = await this.evaluate(credId, salt);
+    const raw = await Crypto.decrypt(await this.wrappingKey(out), wrapped);
+    return crypto.subtle.importKey('raw', fromB64(raw), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
+  }
+};
+
+// The user dismissed the OS passkey sheet (or the browser refused without a tap).
+const isPasskeyCancel = err => err && (err.name === 'NotAllowedError' || err.name === 'AbortError');
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ═══ LOCAL STORAGE (IndexedDB) ═══
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -209,7 +294,9 @@ const state = {
   editingId: null,
   searchQuery: '',
   inactivityTimer: null,
-  INACTIVITY_MS: 10 * 60 * 1000  // 10 minutes
+  INACTIVITY_MS: 10 * 60 * 1000,  // 10 minutes
+  passkeyPrompting: false,
+  passkeyAutoTried: false   // auto-prompt at most once per lock, so a cancel doesn't loop
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -241,6 +328,7 @@ function showScreen(name) {
   if (name === 'settings') loadSettingsFields();
   if (name === 'unlock') {
     document.getElementById('unlock-username').textContent = localStorage.getItem('pm_username') || '';
+    document.getElementById('btn-passkey-unlock').style.display = Passkey.enrolled() ? '' : 'none';
   }
   if (name === 'setup') loadSignupOptions();
 }
@@ -387,6 +475,7 @@ function lockApp() {
   state.masterKeyHash = null;
   state.passwords = [];
   state.editingId = null;
+  state.passkeyAutoTried = false;
   clearTimeout(state.inactivityTimer);
   closeAdd();
   showScreen('unlock');
@@ -529,6 +618,9 @@ function updateServerBadge(online) {
 
 function loadSettingsFields() {
   document.getElementById('settings-username').textContent = state.username || '—';
+  document.getElementById('passkey-group').style.display = Passkey.supported() ? '' : 'none';
+  document.getElementById('btn-passkey').textContent = Passkey.enrolled()
+    ? '🪪 Turn Off Passkey Unlock' : '🪪 Enable Passkey Unlock';
 }
 
 // Show the signup-code field only when the server asks for one.
@@ -683,27 +775,110 @@ async function handleUnlock() {
       return;
     }
 
-    const key  = await Crypto.deriveKey(pw, fromB64(localStorage.getItem('pm_salt')));
-    const hash = await Crypto.hashForVerification(key);
-    if (hash !== localStorage.getItem('pm_key_hash')) {
+    const key = await Crypto.deriveKey(pw, fromB64(localStorage.getItem('pm_salt')));
+    if (!(await unlockOffline(key))) {
       hideLoading();
       return rejectUnlock();
     }
-
     document.getElementById('unlock-password').value = '';
-    state.username      = username;
-    state.masterKey     = key;
-    state.masterKeyHash = hash;
-    state.serverOnline  = false;
-    await loadPasswords();
     hideLoading();
-    showScreen('main');
-    renderPasswordList();
-    resetInactivityTimer();
-    showToast('Server unreachable — using this device’s offline copy', 'info');
   } catch (err) {
     hideLoading();
     showToast('Unlock failed: ' + err.message, 'error');
+    console.error(err);
+  }
+}
+
+// Open the vault from the local cache. Returns false if the key doesn't match it.
+async function unlockOffline(key) {
+  const hash = await Crypto.hashForVerification(key);
+  if (hash !== localStorage.getItem('pm_key_hash')) return false;
+
+  state.username      = localStorage.getItem('pm_username');
+  state.masterKey     = key;
+  state.masterKeyHash = hash;
+  state.serverOnline  = false;
+  await loadPasswords();
+  showScreen('main');
+  renderPasswordList();
+  resetInactivityTimer();
+  showToast('Server unreachable — using this device’s offline copy', 'info');
+  return true;
+}
+
+// Unlock with the passkey enrolled on this device. `auto` is the prompt shown on
+// its own when the unlock screen appears; cancelling that one stays quiet.
+async function handlePasskeyUnlock({ auto = false } = {}) {
+  if (state.passkeyPrompting || state.masterKey || !Passkey.enrolled()) return;
+  state.passkeyPrompting = true;
+  let key;
+  try {
+    key = await Passkey.unlock();
+  } catch (err) {
+    if (!isPasskeyCancel(err)) {
+      showToast('Passkey unlock failed: ' + err.message, 'error');
+      console.error(err);
+    } else if (!auto) {
+      showToast('Passkey unlock cancelled', 'info');
+    }
+    return;
+  } finally {
+    state.passkeyPrompting = false;
+  }
+
+  showLoading('Unlocking…');
+  try {
+    const username = localStorage.getItem('pm_username');
+    const h = await API.health();
+    let ok;
+    if (h && h.status === 'ok') {
+      try {
+        await startSession(await API.login(username, await Crypto.deriveAuthKey(key)), key);
+        ok = true;
+      } catch (err) {
+        if (err.status !== 401) throw err;
+        ok = false;
+      }
+    } else {
+      ok = await unlockOffline(key);
+    }
+    hideLoading();
+
+    // The stored key is stale: the master password was changed on another device.
+    if (!ok) {
+      Passkey.remove();
+      showScreen('unlock');
+      showToast('Your master password changed — enter it, then re-enable passkey unlock in Settings', 'error');
+    }
+  } catch (err) {
+    hideLoading();
+    showToast('Unlock failed: ' + err.message, 'error');
+    console.error(err);
+  }
+}
+
+function autoPasskeyUnlock() {
+  if (state.passkeyAutoTried || state.currentScreen !== 'unlock' || !Passkey.enrolled()) return;
+  state.passkeyAutoTried = true;
+  handlePasskeyUnlock({ auto: true });
+}
+
+async function handlePasskeyToggle() {
+  if (Passkey.enrolled()) {
+    const ok = await confirmDialog('Turn off passkey unlock on this device? You will need your master password to unlock.');
+    if (!ok) return;
+    Passkey.remove();
+    loadSettingsFields();
+    return showToast('Passkey unlock turned off', 'info');
+  }
+
+  try {
+    await Passkey.enroll(state.masterKey, localStorage.getItem('pm_user_id'), state.username);
+    loadSettingsFields();
+    showToast('Passkey unlock enabled on this device', 'success');
+  } catch (err) {
+    if (isPasskeyCancel(err)) return showToast('Passkey setup cancelled', 'info');
+    showToast('Could not enable passkey: ' + err.message, 'error');
     console.error(err);
   }
 }
@@ -1128,6 +1303,18 @@ async function handleChangePw() {
     document.getElementById('change-pw-form').classList.remove('open');
     renderPasswordList();
     showToast('Master password updated — other devices must sign in again', 'success');
+
+    // The passkey's copy of the key is now stale; re-encrypt it (one more prompt).
+    if (Passkey.enrolled()) {
+      try {
+        await Passkey.rewrap(newKey);
+      } catch (err) {
+        Passkey.remove();
+        loadSettingsFields();
+        showToast('Passkey unlock was turned off — enable it again below', 'info');
+        if (!isPasskeyCancel(err)) console.error(err);
+      }
+    }
   } catch (err) {
     hideLoading();
     showToast('Failed: ' + err.message, 'error');
@@ -1164,7 +1351,7 @@ async function handleDeleteAccount() {
 // Forget the account on this device (the server copy is untouched).
 async function clearLocalData() {
   ['pm_user_id', 'pm_username', 'pm_salt', 'pm_key_hash', 'pm_pending_deletes', 'pm_pending_writes',
-   'pm_server_url', 'pm_server_key'] // last two: left over from the single-vault version
+   Passkey.STORAGE_KEY, 'pm_server_url', 'pm_server_key'] // last two: left over from the single-vault version
     .forEach(k => localStorage.removeItem(k));
   await LocalDB.clear().catch(() => {});
 }
@@ -1244,6 +1431,7 @@ async function init() {
     if (localStorage.getItem('pm_username')) {
       showScreen('unlock');
       checkServerStatus();
+      autoPasskeyUnlock();
     } else {
       showScreen('setup');
     }
@@ -1257,6 +1445,8 @@ async function init() {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && state.masterKey) {
         lockApp();
+      } else if (!document.hidden) {
+        autoPasskeyUnlock();
       }
     });
 

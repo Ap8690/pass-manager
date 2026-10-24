@@ -674,6 +674,8 @@
       </div>
 
       <button class="btn btn-primary btn-full" onclick="handleUnlock()">Unlock</button>
+      <button class="btn btn-secondary btn-full" id="btn-passkey-unlock" style="margin-top:10px;display:none"
+              onclick="handlePasskeyUnlock()">🪪 Unlock with Passkey</button>
       <button class="forgot-link" onclick="handleSignOut()">Not you? Sign out / switch account</button>
     </div>
   </div>
@@ -832,6 +834,12 @@
               <input type="password" id="cpw-confirm" placeholder="Confirm new password">
             </div>
             <button class="btn btn-primary btn-full" onclick="handleChangePw()">Update Password</button>
+          </div>
+        </div>
+        <div class="form-group" id="passkey-group">
+          <button class="btn btn-secondary btn-full" id="btn-passkey" onclick="handlePasskeyToggle()">🪪 Enable Passkey Unlock</button>
+          <div class="settings-row-sub" style="margin-top:6px;text-align:center">
+            Unlock on this device with Face ID, Touch ID, Windows Hello or your PIN
           </div>
         </div>
         <div class="form-group">

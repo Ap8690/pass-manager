@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pass-manager-v3';
+const CACHE_NAME = 'pass-manager-v4';
 const STATIC_ASSETS = ['/', '/app.js', '/manifest.json'];
 
 // Install – pre-cache static assets
